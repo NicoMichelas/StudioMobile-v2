@@ -1,6 +1,5 @@
 name: Import project zip and build APK
 
-
 # Depose un .zip (par exemple StudioMobile-v2-fixed.zip) dans le dossier
 # incoming/ a la racine du depot, via l'interface GitHub (Add file ->
 # Upload files, en naviguant d'abord dans le dossier incoming/, ou en le
@@ -65,7 +64,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -A -- . ':!.github'
           if git diff --cached --quiet; then
             echo "Rien a committer."
           else
