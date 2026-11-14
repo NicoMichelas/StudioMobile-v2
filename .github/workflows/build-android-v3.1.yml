@@ -1,0 +1,81 @@
+name: Studio Mobile V3.1 Android
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "StudioMobile-v3.1-source.zip"
+      - "build-android-v3.1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build V3.1 debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify canonical source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s StudioMobile-v3.1-source.zip
+          unzip -tq StudioMobile-v3.1-source.zip
+          rm -rf _studio_mobile_v31_src
+          mkdir -p _studio_mobile_v31_src
+          unzip -q StudioMobile-v3.1-source.zip -d _studio_mobile_v31_src
+          test -s _studio_mobile_v31_src/settings.gradle.kts
+          test -s _studio_mobile_v31_src/build.gradle.kts
+          test -s _studio_mobile_v31_src/app/build.gradle.kts
+          test -s _studio_mobile_v31_src/app/src/main/java/org/studiomobile/v2/MainActivity.kt
+          test -s _studio_mobile_v31_src/app/src/main/java/org/studiomobile/v2/ProjectDocument.kt
+          grep -q 'versionName = "3.1.0"' _studio_mobile_v31_src/app/build.gradle.kts
+          grep -q 'sourceItemIds' _studio_mobile_v31_src/app/src/main/java/org/studiomobile/v2/ProjectDocument.kt
+          grep -q 'androidx.media3:media3-exoplayer' _studio_mobile_v31_src/app/build.gradle.kts
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 35 platform and build tools
+        shell: bash
+        run: |
+          (yes || true) | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Compile canonical V3.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p _studio_mobile_v31_src :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK output
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="_studio_mobile_v31_src/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          cp "$APK" StudioMobile-v3.1-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudioMobile-v3.1-debug-apk
+          path: StudioMobile-v3.1-debug.apk
+          if-no-files-found: error
+          retention-days: 14
