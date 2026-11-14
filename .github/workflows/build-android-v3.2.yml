@@ -1,0 +1,75 @@
+name: Studio Mobile V3.2 Android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build APK V3.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate V3.2 source archive
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$GITHUB_WORKSPACE/StudioMobile-v3.2-source.zip"
+          test -f "$ARCHIVE" || { echo "Archive introuvable : StudioMobile-v3.2-source.zip à la racine du dépôt."; exit 1; }
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/studio-mobile-v3.2"
+          unzip -q "${{ steps.source.outputs.archive }}" -d "$RUNNER_TEMP/studio-mobile-v3.2"
+          test -f "$RUNNER_TEMP/studio-mobile-v3.2/settings.gradle.kts"
+          test -f "$RUNNER_TEMP/studio-mobile-v3.2/app/build.gradle.kts"
+          test -f "$RUNNER_TEMP/studio-mobile-v3.2/app/src/main/AndroidManifest.xml"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools, platforms;android-35, build-tools;35.0.0'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Compile debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p "$RUNNER_TEMP/studio-mobile-v3.2" :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK output
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$RUNNER_TEMP/studio-mobile-v3.2/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$APK" "$GITHUB_WORKSPACE/dist/StudioMobile-v3.2-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/dist/StudioMobile-v3.2-debug.apk"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudioMobile-v3.2-debug-apk
+          path: dist/StudioMobile-v3.2-debug.apk
+          if-no-files-found: error
+          retention-days: 14
