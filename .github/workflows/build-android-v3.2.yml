@@ -1,20 +1,58 @@
 
-name: Build Studio Mobile V3.2 APK
+name: Studio Mobile V3.2 Android
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'StudioMobile-v3.2-source.zip'
-      - '.github/workflows/**'
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build APK from V3.2 archive
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify and extract V3.2 archive
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$GITHUB_WORKSPACE/StudioMobile-v3.2-source.zip"
+          test -s "$ARCHIVE"
+
+          unzip -t "$ARCHIVE"
+
+          SRC="$RUNNER_TEMP/studio-mobile-v3.2-source"
+          rm -rf "$SRC"
+          mkdir -p "$SRC"
+          unzip -q "$ARCHIVE" -d "$SRC"
+
+          test -f "$SRC/settings.gradle.kts"
+          test -f "$SRC/build.gradle.kts"
+          test -f "$SRC/app/build.gradle.kts"
+          test -f "$SRC/app/src/main/AndroidManifest.xml"
+
+          MAIN="$SRC/app/src/main/java/org/studiomobile/v2/MainActivity.kt"
+          DOC="$SRC/app/src/main/java/org/studiomobile/v2/ProjectDocument.kt"
+
+          test -s "$MAIN"
+          test -s "$DOC"
+
+          grep -q 'showCanvasDimensionsDialog' "$MAIN"
+          grep -q 'groupSelectedLayers' "$MAIN"
+          grep -q 'showCropDialog' "$MAIN"
+          grep -q 'configureVideoPoster' "$MAIN"
+          grep -q 'groupId' "$DOC"
+          grep -q 'versionName = "3.2.0"' "$SRC/app/build.gradle.kts"
+          grep -q 'versionCode = 9' "$SRC/app/build.gradle.kts"
+
+          echo "src=$SRC" >> "$GITHUB_OUTPUT"
+          echo "Sources V3.2 vérifiées."
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -26,28 +64,56 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Extract source archive
+      - name: Compile V3.2 APK
+        shell: bash
+        env:
+          SRC: ${{ steps.source.outputs.src }}
         run: |
-          unzip -q StudioMobile-v3.2-source.zip -d source
-          if [ -f source/gradlew ]; then
-            cp -a source/. .
-          fi
+          set -euo pipefail
+          test -f "$SRC/settings.gradle.kts"
+          gradle -p "$SRC" :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug
+      - name: Verify APK identity and version
+        shell: bash
+        env:
+          SRC: ${{ steps.source.outputs.src }}
+        run: |
+          set -euo pipefail
+          APK="$SRC/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
 
-      - name: Upload APK
+          SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_HOME"
+          AAPT="$SDK_HOME/build-tools/35.0.0/aapt"
+          test -x "$AAPT"
+
+          "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+
+          grep -F "package: name='org.studiomobile.v2' versionCode='9' versionName='3.2.0'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -F "application-label:'Studio Mobile 3.2'" "$RUNNER_TEMP/apk-badging.txt"
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$APK" "$GITHUB_WORKSPACE/dist/StudioMobile-v3.2-debug.apk"
+          sha256sum "$GITHUB_WORKSPACE/dist/StudioMobile-v3.2-debug.apk"
+
+      - name: Upload verified V3.2 APK
         uses: actions/upload-artifact@v4
         with:
           name: StudioMobile-v3.2-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: dist/StudioMobile-v3.2-debug.apk
           if-no-files-found: error
+          retention-days: 14
